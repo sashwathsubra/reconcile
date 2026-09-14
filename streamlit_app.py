@@ -22,7 +22,7 @@ import requests
 import streamlit as st
 from jose import JWTError, jwt
 
-API_URL = os.getenv("RECONCILE_API_URL", "http://localhost:8000")
+from config import API_URL
 COOKIE_NAME = "reconcile_session"
 SECRET_KEY = os.getenv("SECRET_KEY", "reconcile-secret-key-for-local-development-32-chars-long")
 

@@ -6,7 +6,7 @@ from typing import Any
 import requests
 import streamlit as st
 
-API_URL = os.getenv("RECONCILE_API_URL", "http://localhost:8000")
+from config import API_URL
 COOKIE_NAME = "reconcile_session"
 
 

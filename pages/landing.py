@@ -14,7 +14,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-API_URL = os.getenv("RECONCILE_API_URL", "http://localhost:8000")
+from config import API_URL
 
 st.markdown(
     '<div class="hero"><div class="eyebrow" role="doc-subtitle">Agentic bookkeeping • phase 01</div>'
