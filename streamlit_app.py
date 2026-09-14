@@ -30,7 +30,6 @@ st.set_page_config(
     page_title="Reconcile — Agentic Bookkeeping",
     page_icon="📒",
     layout="wide",
-    initial_sidebar_state="collapsed",
     menu_items={
         "Get Help": None,
         "Report a bug": None,
@@ -69,6 +68,36 @@ st.markdown(
     .app-footer { border-top: 1px solid var(--line); margin-top: 3rem; padding: 1.5rem 0 .5rem; font-size: .8rem; color: var(--muted); font-family: 'Space Mono', monospace; }
     .app-footer a { color: var(--muted); text-decoration: underline; }
     .app-footer a:hover { color: var(--ink); }
+    
+    /* Icon-rail sidebar */
+    [data-testid="stSidebar"] {
+        min-width: 5rem !important;
+        max-width: 5rem !important;
+        transition: min-width 0.2s ease, max-width 0.2s ease;
+        overflow-x: hidden;
+    }
+    [data-testid="stSidebar"]:hover {
+        min-width: 16rem !important;
+        max-width: 16rem !important;
+        z-index: 999999;
+    }
+    /* Hide text spans inside navigation until hovered */
+    [data-testid="stSidebarNav"] ul li span:not(:first-child) {
+        opacity: 0;
+        transition: opacity 0.2s ease;
+        white-space: nowrap;
+    }
+    [data-testid="stSidebar"]:hover [data-testid="stSidebarNav"] ul li span:not(:first-child) {
+        opacity: 1;
+    }
+    /* Hide section headers in collapsed state */
+    [data-testid="stSidebarNav"] ul li div {
+        opacity: 0;
+    }
+    [data-testid="stSidebar"]:hover [data-testid="stSidebarNav"] ul li div {
+        opacity: 1;
+        transition: opacity 0.2s ease;
+    }
     </style>
     """,
     unsafe_allow_html=True,

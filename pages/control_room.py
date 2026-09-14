@@ -48,27 +48,17 @@ def get(path: str) -> list[dict[str, Any]]:
 
 
 
-# ── Reset demo data expander ────────────────────────────────────────────────
-with st.expander("⚠️ Reset demo data", expanded=False):
-    st.warning(
-        "This clears every row from every demo table (transactions, runs, ledger entries, "
-        "audit log, vendor rules, human corrections) and resets auto-increment counters for your company. "
-        "It does **not** touch Plaid Sandbox or QuickBooks Sandbox — only this app's database records."
+def header_branding():
+    st.markdown(
+        """<div class="hero">
+            <div class="eyebrow">Control Room</div>
+            <h1>Reconcile</h1>
+            <p>Agentic bookkeeping control room &mdash; ingests bank transactions, categorises with AI, posts to ledger.</p>
+        </div>""",
+        unsafe_allow_html=True
     )
-    confirmed = st.checkbox(
-        "I understand this clears all local demo data",
-        key="reset-confirm-checkbox",
-    )
-    if st.button("Reset now", key="reset-now-btn", disabled=not confirmed):
-        resp = api_request("POST", "/admin/reset", timeout=10)
-        if resp is not None and resp.ok:
-            data = resp.json()
-            deleted = data.get("deleted", {})
-            summary = ", ".join(f"{tbl}: {cnt} rows" for tbl, cnt in deleted.items())
-            st.success(f"Reset complete — {summary}")
-            st.rerun()
-        elif resp is not None:
-            st.error(f"Reset failed: {resp.text}")
+
+header_branding()
 
 # ── Toolbar ─────────────────────────────────────────────────────────────────
 refresh_col, status_col = st.columns([1, 4])
@@ -78,9 +68,9 @@ with refresh_col:
 with status_col:
     st.caption("Live view · refreshes automatically after every completed action")
 
-if st.button("Run Plaid sandbox demo", type="primary"):
-    with st.spinner("Running Plaid, Groq, and QuickBooks sandbox steps. This can take up to three minutes..."):
-        response = api_request("POST", "/runs/synthetic_demo", timeout=180)
+if st.button("Run demo", type="primary"):
+    with st.spinner("Running agentic categorization pipeline..."):
+        response = api_request("POST", "/runs/synthetic_demo", timeout=30)
     if response is not None and response.ok:
         data = response.json()
         st.success(f"Run {data.get('run_id')} completed and {data.get('ledger', {}).get('posted', 0)} entries synced.")
