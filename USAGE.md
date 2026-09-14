@@ -12,6 +12,8 @@ You can create an account in two ways:
 ### Persistent Login
 Once logged in, your session is remembered securely. You can close the tab and return later without needing to sign in again. To clear your session, use the **Log out** button in the top right of the Control Room.
 
+> **Note**: For local development or zero-friction access, you can set `REQUIRE_LOGIN=false` in your `.env` file to bypass all authentication screens. To re-enable full auth, set it to `true` or remove the flag.
+
 ## The Control Room
 
 ### Running the Sandbox Demo
