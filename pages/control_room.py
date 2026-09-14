@@ -69,8 +69,8 @@ with status_col:
     st.caption("Live view · refreshes automatically after every completed action")
 
 if st.button("Run demo", type="primary"):
-    with st.spinner("Running agentic categorization pipeline..."):
-        response = api_request("POST", "/runs/synthetic_demo", timeout=30)
+    with st.spinner("Running agentic categorization pipeline... This may take a minute or two as we make real Groq calls."):
+        response = api_request("POST", "/runs/synthetic_demo", timeout=120)
     if response is not None and response.ok:
         data = response.json()
         st.success(f"Run {data.get('run_id')} completed and {data.get('ledger', {}).get('posted', 0)} entries synced.")

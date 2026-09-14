@@ -71,32 +71,37 @@ st.markdown(
     
     /* Icon-rail sidebar */
     [data-testid="stSidebar"] {
-        min-width: 5rem !important;
-        max-width: 5rem !important;
+        min-width: 4rem !important;
+        max-width: 4rem !important;
         transition: min-width 0.2s ease, max-width 0.2s ease;
-        overflow-x: hidden;
+        overflow-x: hidden !important;
+        background-color: var(--panel) !important;
     }
     [data-testid="stSidebar"]:hover {
         min-width: 16rem !important;
         max-width: 16rem !important;
-        z-index: 999999;
+        z-index: 999999 !important;
+        box-shadow: 4px 0 16px rgba(0,0,0,0.15);
     }
-    /* Hide text spans inside navigation until hovered */
-    [data-testid="stSidebarNav"] ul li span:not(:first-child) {
-        opacity: 0;
-        transition: opacity 0.2s ease;
+    /* Streamlit puts the icon and text in spans. We want to hide the text when collapsed. 
+       A reliable way is to force white-space nowrap and just let the 4rem width clip it.
+       To prevent the 'clipped sliver' of text from showing, we'll set color transparent on 
+       the text span, but we must not target the icon span. 
+       Streamlit typically gives the text span a specific class or we can just rely on the 4rem 
+       width clipping if it's tight enough. Let's make it 3.8rem just in case. */
+    [data-testid="stSidebar"] {
+        min-width: 3.8rem !important;
+        max-width: 3.8rem !important;
+    }
+    [data-testid="stSidebarNav"] span {
         white-space: nowrap;
-    }
-    [data-testid="stSidebar"]:hover [data-testid="stSidebarNav"] ul li span:not(:first-child) {
-        opacity: 1;
     }
     /* Hide section headers in collapsed state */
     [data-testid="stSidebarNav"] ul li div {
-        opacity: 0;
+        display: none;
     }
     [data-testid="stSidebar"]:hover [data-testid="stSidebarNav"] ul li div {
-        opacity: 1;
-        transition: opacity 0.2s ease;
+        display: block;
     }
     </style>
     """,
