@@ -68,15 +68,48 @@ with refresh_col:
 with status_col:
     st.caption("Live view · refreshes automatically after every completed action")
 
-if st.button("Run demo", type="primary"):
-    with st.spinner("Running agentic categorization pipeline... This may take a minute or two as we make real Groq calls."):
-        response = api_request("POST", "/runs/synthetic_demo", timeout=120)
-    if response is not None and response.ok:
-        data = response.json()
-        st.success(f"Run {data.get('run_id')} completed and {data.get('ledger', {}).get('posted', 0)} entries synced.")
-        st.rerun()
-    elif response is not None:
-        st.error(f"Run failed: {response.text}")
+st.subheader("Data Intake")
+demo_col, upload_col = st.columns([1, 1])
+
+with demo_col:
+    st.markdown("**Test with synthetic data**")
+    if st.button("Run demo", type="primary"):
+        with st.spinner("Running agentic categorization pipeline... This may take a minute or two as we make real Groq calls."):
+            response = api_request("POST", "/runs/synthetic_demo", timeout=120)
+        if response is not None and response.ok:
+            data = response.json()
+            st.success(f"Run {data.get('run_id')} completed and {data.get('ledger', {}).get('posted', 0)} entries synced.")
+            st.rerun()
+        elif response is not None:
+            st.error(f"Run failed: {response.text}")
+
+with upload_col:
+    st.markdown("**Upload your own data**")
+    st.caption("Required columns: `amount`, `date`, `merchant_name` (optional: `transaction_id`)")
+    template_csv = "date,merchant_name,amount,transaction_id\n2026-10-01,Starbucks,4.50,tx-123\n2026-10-02,Amazon Web Services,120.00,tx-124\n"
+    st.download_button("Download Template", template_csv, "template.csv", "text/csv")
+    uploaded_file = st.file_uploader("Upload CSV", type=["csv"], label_visibility="collapsed")
+    
+    if uploaded_file and st.button("Process uploaded CSV", type="primary"):
+        with st.spinner("Processing uploaded CSV and running categorization pipeline... This may take a few minutes for real Groq calls."):
+            response = api_request(
+                "POST", 
+                "/runs/upload_csv", 
+                files={"file": (uploaded_file.name, uploaded_file.getvalue(), "text/csv")},
+                timeout=300
+            )
+        if response is not None and response.ok:
+            data = response.json()
+            errs = data.get('parse_errors', 0)
+            dups = data.get('duplicates', 0)
+            msg = f"Run {data.get('run_id')} completed. {data.get('inserted', 0)} rows ingested."
+            if errs > 0 or dups > 0:
+                st.warning(f"{msg} ({errs} parse errors, {dups} duplicates skipped).")
+            else:
+                st.success(msg)
+            st.rerun()
+        elif response is not None:
+            st.error(f"Upload failed: {response.text}")
 
 transactions = get("/transactions")
 reviews = get("/reviews")

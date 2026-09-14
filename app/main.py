@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, status, UploadFile, File
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -606,6 +606,188 @@ def trigger_synthetic_demo_run(current_user: dict[str, Any] = Depends(get_curren
         "duplicates": 0,
         "parse_errors": 0,
         "status": "completed",
+        "ledger": sync
+    }
+
+
+@app.post("/runs/upload_csv")
+async def upload_csv(
+    file: UploadFile = File(...),
+    current_user: dict[str, Any] = Depends(get_current_user)
+) -> dict[str, Any]:
+    import csv
+    import io
+    import hashlib
+    import uuid
+
+    uid = current_user["id"]
+    source = "csv_upload"
+    
+    content = await file.read()
+    text = content.decode("utf-8", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    
+    transactions = []
+    for row in reader:
+        # Normalize keys
+        row = {k.strip().lower(): v.strip() for k, v in row.items() if k}
+        amount_raw = row.get("amount")
+        date = row.get("date")
+        vendor = row.get("merchant_name") or row.get("vendor") or row.get("name")
+        tx_id = row.get("transaction_id")
+        
+        try:
+            amount = float(amount_raw) if amount_raw else None
+        except ValueError:
+            amount = None # Will trigger validation error in the loop
+            
+        if not tx_id and amount is not None and date and vendor:
+            h = hashlib.sha256(f"{date}|{vendor}|{amount}".encode()).hexdigest()
+            tx_id = f"csv-{h[:12]}"
+        elif not tx_id:
+            tx_id = f"csv-unk-{uuid.uuid4().hex[:8]}"
+            
+        transactions.append({
+            "transaction_id": tx_id,
+            "amount": amount,
+            "date": date,
+            "merchant_name": vendor,
+            "raw_csv_row": row
+        })
+
+    with db.connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO runs(user_id, source, status, transaction_count, created_at) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (uid, source, "ingesting", len(transactions), db.now()),
+        )
+        run_row = cursor.fetchone()
+        run_id = run_row["id"] if isinstance(run_row, dict) or hasattr(run_row, "keys") else run_row[0]
+
+        inserted = 0
+        duplicates = 0
+        parse_errors = 0
+        audit_events: list[tuple[int | None, str, dict[str, Any]]] = []
+
+        for transaction in transactions:
+            external_id = transaction.get("transaction_id", "unknown")
+            try:
+                parsed_amount = transaction.get("amount")
+                parsed_date = transaction.get("date")
+                parsed_vendor = transaction.get("merchant_name")
+
+                if parsed_amount is None or not parsed_date or not parsed_vendor:
+                    raise ValueError(
+                        f"Missing or invalid fields: amount={parsed_amount}, date={parsed_date}, vendor={parsed_vendor}"
+                    )
+
+                existing = conn.execute(
+                    "SELECT id FROM transactions WHERE user_id = %s AND external_id = %s",
+                    (uid, external_id)
+                ).fetchone()
+                
+                if existing:
+                    duplicates += 1
+                    audit_events.append((None, "duplicate_skipped", {"external_id": external_id}))
+                    continue
+
+                tx_cur = conn.execute(
+                    """
+                    INSERT INTO transactions
+                    (user_id, run_id, source, external_id, raw_payload, parsed_amount, parsed_date, parsed_vendor_raw, status, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s)
+                    RETURNING id
+                    """,
+                    (
+                        uid, run_id, source, external_id,
+                        json.dumps(transaction),
+                        parsed_amount, parsed_date, parsed_vendor, db.now(),
+                    ),
+                )
+                tx_row = tx_cur.fetchone()
+                tx_id = tx_row["id"] if isinstance(tx_row, dict) or hasattr(tx_row, "keys") else tx_row[0]
+                audit_events.append((tx_id, "transaction_ingested", {"source": source, "external_id": external_id}))
+                inserted += 1
+            except Exception as parse_exc:
+                parse_errors += 1
+                error_detail = str(parse_exc)
+                try:
+                    err_cur = conn.execute(
+                        """
+                        INSERT INTO transactions (user_id, run_id, source, external_id, raw_payload, status, created_at)
+                        VALUES (%s, %s, %s, %s, %s, 'flagged', %s)
+                        RETURNING id
+                        """,
+                        (uid, run_id, source, external_id, json.dumps(transaction), db.now()),
+                    )
+                    err_row = err_cur.fetchone()
+                    err_id = err_row["id"] if isinstance(err_row, dict) or hasattr(err_row, "keys") else err_row[0]
+                    audit_events.append(
+                        (err_id, "parse_error", {"error": error_detail, "exception_type": type(parse_exc).__name__})
+                    )
+                except Exception:
+                    audit_events.append((None, "parse_error_unrecoverable", {"external_id": external_id, "error": error_detail}))
+
+        status_str = "completed"
+        if duplicates > 0: status_str = "completed_with_duplicates"
+        if parse_errors > 0: status_str = "completed_with_parse_errors"
+        if parse_errors > 0 and duplicates > 0: status_str = "completed_with_duplicates_and_parse_errors"
+
+        conn.execute("UPDATE runs SET status = %s, transaction_count = %s WHERE id = %s", (status_str, inserted, run_id))
+
+    for transaction_id, event_type, detail in audit_events:
+        db.add_audit(transaction_id, event_type, detail, user_id=uid)
+        
+    db.add_audit(
+        None, "csv_upload_completed",
+        {
+            "run_id": run_id,
+            "added": len(transactions),
+            "inserted": inserted,
+            "duplicates": duplicates,
+            "parse_errors": parse_errors
+        },
+        user_id=uid,
+    )
+
+    # 3. Run the workflow
+    transaction_ids: list[int] = []
+    workflow_results: list[dict[str, Any]] = []
+
+    pending_txs = db.rows(
+        "SELECT * FROM transactions WHERE run_id = %s AND user_id = %s AND status = 'pending' ORDER BY id",
+        (run_id, uid),
+    )
+    graph = build_graph()
+    for tx in pending_txs:
+        transaction_ids.append(tx["id"])
+        workflow_results.append(graph.invoke({"transaction": tx, "memory": []}))
+
+    ledger_results = [res.get("ledger_result", {}) for res in workflow_results]
+    sync = {
+        "posted": sum(res.get("posted", 0) for res in ledger_results),
+        "failed": sum(res.get("failed", 0) for res in ledger_results),
+        "adapter": "local_demo",
+    }
+    
+    db.add_audit(
+        None, "run_completed",
+        {
+            "run_id": run_id,
+            "ingestion": {"run_id": run_id, "inserted": inserted, "source": source},
+            "ledger": sync,
+            "transaction_ids": transaction_ids,
+            "actions": [res.get("decision", {}).get("action") for res in workflow_results],
+        },
+        user_id=uid,
+    )
+    
+    return {
+        "run_id": run_id,
+        "source": source,
+        "inserted": inserted,
+        "duplicates": duplicates,
+        "parse_errors": parse_errors,
+        "status": status_str,
         "ledger": sync
     }
 
