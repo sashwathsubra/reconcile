@@ -136,24 +136,26 @@ class QuickBooksClient:
 def sync_pending_transactions(
     transaction_ids: list[int] | None = None,
     user_id: int | None = None,
+    adapter: str = "quickbooks_sandbox",
 ) -> dict[str, Any]:
     """
-    Sync pending transactions to QuickBooks ledger.
+    Sync pending transactions to ledger.
     Scoped by user_id.
     """
-    client = QuickBooksClient()
+    client = QuickBooksClient() if adapter != "local_demo" else None
 
     company_info = None
-    try:
-        company_info = client.company_info()
-    except Exception as exc:
-        error_msg = str(exc)
-        db.add_audit(
-            None,
-            "quickbooks_company_info_failed",
-            {"error": error_msg, "exception_type": type(exc).__name__},
-            user_id=user_id,
-        )
+    if client:
+        try:
+            company_info = client.company_info()
+        except Exception as exc:
+            error_msg = str(exc)
+            db.add_audit(
+                None,
+                "quickbooks_company_info_failed",
+                {"error": error_msg, "exception_type": type(exc).__name__},
+                user_id=user_id,
+            )
 
     if transaction_ids:
         placeholders = ",".join("%s" for _ in transaction_ids)
@@ -179,8 +181,11 @@ def sync_pending_transactions(
     for transaction in pending:
         uid = user_id or transaction.get("user_id") or 1
         try:
-            ledger_response = client.create_journal_entry(transaction)
-            external_id = ledger_response.get("JournalEntry", {}).get("Id", "unknown")
+            if adapter == "local_demo":
+                external_id = f"local-demo-ledger-{transaction['id']}"
+            else:
+                ledger_response = client.create_journal_entry(transaction)
+                external_id = ledger_response.get("JournalEntry", {}).get("Id", "unknown")
 
             with db.connection() as conn:
                 conn.execute(
@@ -210,7 +215,7 @@ def sync_pending_transactions(
                 transaction["id"],
                 "ledger_synced",
                 {
-                    "adapter": "quickbooks_sandbox",
+                    "adapter": adapter,
                     "external_ledger_id": external_id,
                 },
                 user_id=uid,
@@ -233,7 +238,7 @@ def sync_pending_transactions(
                 transaction["id"],
                 "ledger_sync_failed",
                 {
-                    "adapter": "quickbooks_sandbox",
+                    "adapter": adapter,
                     "error": error_msg,
                     "exception_type": type(exc).__name__,
                 },
@@ -243,6 +248,6 @@ def sync_pending_transactions(
     return {
         "posted": posted,
         "failed": failed,
-        "adapter": "quickbooks_sandbox",
+        "adapter": adapter,
         "company_info": company_info,
     }

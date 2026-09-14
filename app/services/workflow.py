@@ -171,9 +171,10 @@ def auto_post_node(state: ReconcileState) -> ReconcileState:
 
     transaction = state["transaction"]
     uid = transaction.get("user_id") or 1
+    adapter = "local_demo" if transaction.get("source") == "synthetic_demo" else "quickbooks_sandbox"
 
     try:
-        result = sync_pending_transactions([transaction["id"]], user_id=uid)
+        result = sync_pending_transactions([transaction["id"]], user_id=uid, adapter=adapter)
         state["ledger_result"] = result
 
         db.add_audit(

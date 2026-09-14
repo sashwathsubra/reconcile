@@ -47,21 +47,6 @@ def get(path: str) -> list[dict[str, Any]]:
     return []
 
 
-user_col, logout_col = st.columns([4, 1])
-with user_col:
-    st.markdown(f"<div class='user-badge'>Logged in as: <strong>{st.session_state.get('email', 'User')}</strong></div>", unsafe_allow_html=True)
-with logout_col:
-    if st.button("Log out", key="logout-btn"):
-        # Revoke the session server-side first (marks the token_hash as revoked in DB)
-        try:
-            requests.post(f"{API_URL}/auth/logout", headers=get_auth_headers(), timeout=5)
-        except Exception:
-            pass  # Best-effort; session_state clear below is always safe
-        st.session_state.pop("token", None)
-        st.session_state.pop("email", None)
-        # The browser's HttpOnly cookie is cleared by the Set-Cookie: max-age=0
-        # header returned by POST /auth/logout.  No JS needed.
-        st.rerun()
 
 # ── Reset demo data expander ────────────────────────────────────────────────
 with st.expander("⚠️ Reset demo data", expanded=False):
@@ -95,7 +80,7 @@ with status_col:
 
 if st.button("Run Plaid sandbox demo", type="primary"):
     with st.spinner("Running Plaid, Groq, and QuickBooks sandbox steps. This can take up to three minutes..."):
-        response = api_request("POST", "/runs/demo", timeout=180)
+        response = api_request("POST", "/runs/synthetic_demo", timeout=180)
     if response is not None and response.ok:
         data = response.json()
         st.success(f"Run {data.get('run_id')} completed and {data.get('ledger', {}).get('posted', 0)} entries synced.")

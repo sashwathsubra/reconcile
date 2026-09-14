@@ -518,6 +518,98 @@ def trigger_demo_run(current_user: dict[str, Any] = Depends(get_current_user)) -
     return {**run, "ledger": sync}
 
 
+@app.post("/runs/synthetic_demo")
+def trigger_synthetic_demo_run(current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    uid = current_user["id"]
+    source = "synthetic_demo"
+    
+    # 1. Create a run record
+    with db.connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO runs(user_id, source, status, transaction_count, created_at) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (uid, source, "ingesting", 8, db.now()),
+        )
+        run_row = cursor.fetchone()
+        run_id = run_row["id"] if isinstance(run_row, dict) or hasattr(run_row, "keys") else run_row[0]
+
+    # 2. Insert synthetic transactions
+    # 2-3 clear vendors, 1 ambiguous, 1 unrecognizable, 1 near duplicate
+    import json
+    import uuid
+    synthetic_txs = [
+        {"amount": 14.50, "date": "2026-09-01", "merchant_name": "STARBUCKS STORE #12345"}, # Clear
+        {"amount": 120.00, "date": "2026-09-02", "merchant_name": "AMAZON WEB SERVICES AWS.AMAZON.CO"}, # Clear
+        {"amount": -4500.00, "date": "2026-09-03", "merchant_name": "GUSTO PAYROLL"}, # Clear
+        {"amount": 45.00, "date": "2026-09-04", "merchant_name": "SQ *LOCAL CAFE"}, # Ambiguous (needs info for middle confidence, maybe wait, Groq might be very confident here. Let's make it borderline)
+        {"amount": 89.99, "date": "2026-09-05", "merchant_name": "FIVERR INC."}, # Ambiguous
+        {"amount": 250.00, "date": "2026-09-06", "merchant_name": "TXN*892348-ABC"}, # Unrecognizable
+        {"amount": 14.50, "date": "2026-09-01", "merchant_name": "STARBUCKS STORE #12345"}, # Duplicate of #1
+        {"amount": 12.00, "date": "2026-09-07", "merchant_name": "UBER EATS"}, # Clear
+    ]
+    
+    inserted = 0
+    with db.connection() as conn:
+        for tx in synthetic_txs:
+            external_id = f"synth-{uuid.uuid4().hex[:8]}"
+            conn.execute(
+                """
+                INSERT INTO transactions
+                (user_id, run_id, source, external_id, raw_payload, parsed_amount, parsed_date, parsed_vendor_raw, status, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s)
+                """,
+                (
+                    uid, run_id, source, external_id, json.dumps(tx),
+                    tx["amount"], tx["date"], tx["merchant_name"], db.now()
+                )
+            )
+            inserted += 1
+            
+        conn.execute("UPDATE runs SET status = 'completed', transaction_count = %s WHERE id = %s", (inserted, run_id))
+
+    # 3. Run the workflow
+    transaction_ids: list[int] = []
+    workflow_results: list[dict[str, Any]] = []
+
+    transactions = db.rows(
+        "SELECT * FROM transactions WHERE run_id = %s AND user_id = %s AND status = 'pending' ORDER BY id",
+        (run_id, uid),
+    )
+    graph = build_graph()
+    for transaction in transactions:
+        transaction_ids.append(transaction["id"])
+        workflow_results.append(graph.invoke({"transaction": transaction, "memory": []}))
+
+    ledger_results = [result.get("ledger_result", {}) for result in workflow_results]
+    sync = {
+        "posted": sum(result.get("posted", 0) for result in ledger_results),
+        "failed": sum(result.get("failed", 0) for result in ledger_results),
+        "adapter": "local_demo",
+    }
+    
+    db.add_audit(
+        None,
+        "run_completed",
+        {
+            "run_id": run_id,
+            "ingestion": {"run_id": run_id, "inserted": inserted, "source": source},
+            "ledger": sync,
+            "transaction_ids": transaction_ids,
+            "actions": [result.get("decision", {}).get("action") for result in workflow_results],
+        },
+        user_id=uid,
+    )
+    
+    return {
+        "run_id": run_id,
+        "source": source,
+        "inserted": inserted,
+        "duplicates": 0,
+        "parse_errors": 0,
+        "status": "completed",
+        "ledger": sync
+    }
+
+
 @app.get("/runs")
 def list_runs(current_user: dict[str, Any] = Depends(get_current_user)) -> list[dict[str, Any]]:
     return db.rows("SELECT * FROM runs WHERE user_id = %s ORDER BY id DESC", (current_user["id"],))

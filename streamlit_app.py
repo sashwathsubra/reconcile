@@ -30,6 +30,7 @@ st.set_page_config(
     page_title="Reconcile — Agentic Bookkeeping",
     page_icon="📒",
     layout="wide",
+    initial_sidebar_state="collapsed",
     menu_items={
         "Get Help": None,
         "Report a bug": None,
